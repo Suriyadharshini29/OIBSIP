@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PyBot — Python AI Chat</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0d1117;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* ── App Shell ── */
+    #app {
+      width: 100%;
+      max-width: 780px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: #161b22;
+      box-shadow: 0 0 60px rgba(0,0,0,0.6);
+    }
+
+    /* ── Header ── */
+    #header {
+      padding: 16px 24px;
+      background: #0d1117;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .bot-avatar {
+      width: 42px; height: 42px; border-radius: 50%;
+      background: linear-gradient(135deg, #238636, #2ea043);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; flex-shrink: 0;
+    }
+    .bot-avatar.thinking {
+      animation: pulse 1s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(46,160,67,0.4); }
+      50% { box-shadow: 0 0 0 10px rgba(46,160,67,0); }
+    }
+    #header-info h2 { color: #e6edf3; font-size: 16px; font-weight: 600; }
+    #header-info p { color: #8b949e; font-size: 12px; margin-top: 1px; }
+    #status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #2ea043; display: inline-block; margin-right: 6px;
+    }
+
+    /* ── Messages ── */
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      scroll-behavior: smooth;
+    }
+    #messages::-webkit-scrollbar { width: 6px; }
+    #messages::-webkit-scrollbar-track { background: transparent; }
+    #messages::-webkit-scrollbar-thumb { background: #30363d; border-radius: 6px; }
+
+    .msg-row {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      animation: fadeIn 0.25s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .msg-row.user { flex-direction: row-reverse; }
+
+    .avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; flex-shrink: 0; font-weight: 700;
+    }
+    .avatar.bot-av  { background: linear-gradient(135deg, #238636, #2ea043); color: #fff; }
+    .avatar.user-av { background: linear-gradient(135deg, #1f6feb, #388bfd); color: #fff; font-size: 13px; }
+
+    .bubble-wrap { display: flex; flex-direction: column; max-width: 72%; }
+    .msg-row.user .bubble-wrap { align-items: flex-end; }
+
+    .sender-name {
+      font-size: 11px; font-weight: 600; color: #8b949e;
+      margin-bottom: 5px; padding: 0 4px;
+    }
+    .msg-row.user .sender-name { color: #58a6ff; }
+
+    .bubble {
+      padding: 12px 16px;
+      border-radius: 18px;
+      font-size: 14px;
+      line-height: 1.65;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+    .bubble.bot {
+      background: #21262d;
+      color: #e6edf3;
+      border-top-left-radius: 4px;
+      border: 1px solid #30363d;
+    }
+    .bubble.user {
+      background: linear-gradient(135deg, #1f6feb, #388bfd);
+      color: #fff;
+      border-top-right-radius: 4px;
+    }
+
+    /* inline code */
+    .bubble code {
+      background: rgba(110,118,129,0.2);
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-family: 'Consolas', monospace;
+      font-size: 13px;
+      color: #f0883e;
+    }
+    /* code block */
+    .bubble pre {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-top: 8px;
+      overflow-x: auto;
+      font-family: 'Consolas', monospace;
+      font-size: 13px;
+      color: #a5d6ff;
+      line-height: 1.6;
+    }
+    /* bold */
+    .bubble strong { color: #f0883e; font-weight: 600; }
+
+    .msg-time {
+      font-size: 10px; color: #484f58;
+      margin-top: 4px; padding: 0 4px;
+    }
+
+    /* ── Typing indicator ── */
+    #typing-row {
+      display: none;
+      gap: 12px;
+      align-items: flex-start;
+      animation: fadeIn 0.2s ease;
+    }
+    .typing-bubble {
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 18px;
+      border-top-left-radius: 4px;
+      padding: 14px 18px;
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+    .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #58a6ff;
+      animation: bounce 1.2s infinite;
+    }
+    .dot:nth-child(2) { animation-delay: 0.2s; }
+    .dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+      40% { transform: translateY(-6px); opacity: 1; }
+    }
+
+    /* ── Suggestions ── */
+    #suggestions {
+      padding: 8px 20px 4px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .sug-btn {
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #8b949e;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .sug-btn:hover { background: #30363d; color: #e6edf3; border-color: #58a6ff; }
+
+    /* ── Input Area ── */
+    #input-area {
+      padding: 16px 20px;
+      background: #0d1117;
+      border-top: 1px solid #30363d;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+    #msg-input {
+      flex: 1;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 14px;
+      padding: 12px 16px;
+      color: #e6edf3;
+      font-size: 14px;
+      font-family: 'Segoe UI', sans-serif;
+      outline: none;
+      resize: none;
+      max-height: 140px;
+      overflow-y: auto;
+      transition: border-color 0.2s;
+      line-height: 1.5;
+    }
+    #msg-input:focus { border-color: #58a6ff; }
+    #msg-input::placeholder { color: #484f58; }
+
+    #send-btn {
+      width: 44px; height: 44px;
+      background: #238636;
+      border: none; border-radius: 12px;
+      color: #fff; font-size: 16px;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s, transform 0.1s;
+      flex-shrink: 0;
+    }
+    #send-btn:hover:not(:disabled) { background: #2ea043; transform: scale(1.05); }
+    #send-btn:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+
+    #char-hint {
+      text-align: right;
+      font-size: 11px;
+      color: #484f58;
+      padding: 2px 22px 0;
+    }
+
+    /* ── Welcome splash ── */
+    #welcome {
+      text-align: center;
+      padding: 32px 20px;
+      color: #8b949e;
+    }
+    #welcome .big-emoji { font-size: 52px; margin-bottom: 12px; }
+    #welcome h3 { color: #e6edf3; font-size: 20px; margin-bottom: 8px; }
+    #welcome p { font-size: 13px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Header -->
+  <div id="header">
+    <div class="bot-avatar" id="bot-avatar">🤖</div>
+    <div id="header-info">
+      <h2>PyBot — Python AI Assistant</h2>
+      <p><span id="status-dot"></span><span id="status-text">Online</span></p>
+    </div>
+  </div>
+
+  <!-- Messages -->
+  <div id="messages">
+    <div id="welcome">
+      <div class="big-emoji">🐍</div>
+      <h3>Welcome to PyBot Chat</h3>
+      <p>Your personal Python intern assistant.<br/>Ask me anything about Python, request a joke, or just say hi!</p>
+    </div>
+  </div>
+
+  <!-- Typing -->
+  <div id="typing-row">
+    <div class="avatar bot-av">🤖</div>
+    <div class="typing-bubble">
+      <div class="dot"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+    </div>
+  </div>
+
+  <!-- Quick suggestions -->
+  <div id="suggestions">
+    <button class="sug-btn" onclick="suggest('Explain Python lists')">📋 Python lists</button>
+    <button class="sug-btn" onclick="suggest('Tell me a joke')">😄 Joke</button>
+    <button class="sug-btn" onclick="suggest('Share a Python fact')">💡 Fun fact</button>
+    <button class="sug-btn" onclick="suggest('Explain Flask')">🌐 Flask</button>
+    <button class="sug-btn" onclick="suggest('Motivate me')">💪 Motivate me</button>
+    <button class="sug-btn" onclick="suggest('What can you do?')">❓ Help</button>
+  </div>
+
+  <div id="char-hint"></div>
+
+  <!-- Input -->
+  <div id="input-area">
+    <textarea id="msg-input" placeholder="Message PyBot..." rows="1"
+      oninput="onInput()" onkeydown="handleKey(event)"></textarea>
+    <button id="send-btn" onclick="sendMessage()" disabled>➤</button>
+  </div>
+</div>
+
+<script>
+  const socket = io();
+  let myName = "You";
+  let botTyping = false;
+
+  const messagesEl = document.getElementById("messages");
+  const inputEl    = document.getElementById("msg-input");
+  const sendBtn    = document.getElementById("send-btn");
+  const typingRow  = document.getElementById("typing-row");
+  const botAvatar  = document.getElementById("bot-avatar");
+  const statusText = document.getElementById("status-text");
+
+  // ── Helpers ──────────────────────────────────────────
+
+  function now() {
+    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function removeWelcome() {
+    const w = document.getElementById("welcome");
+    if (w) w.remove();
+  }
+
+  function renderMarkdown(text) {
+    // code blocks
+    text = text.replace(/```([\s\S]*?)```/g, '<pre>$1</pre>');
+    // inline code
+    text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // bold
+    text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    // bullet points
+    text = text.replace(/^• /gm, '• ');
+    return text;
+  }
+
+  function appendMessage(text, role) {
+    removeWelcome();
+    const isUser = role === "user";
+    const row = document.createElement("div");
+    row.className = "msg-row " + (isUser ? "user" : "bot");
+
+    const av = document.createElement("div");
+    av.className = "avatar " + (isUser ? "user-av" : "bot-av");
+    av.textContent = isUser ? myName[0].toUpperCase() : "🤖";
+
+    const wrap = document.createElement("div");
+    wrap.className = "bubble-wrap";
+
+    const name = document.createElement("div");
+    name.className = "sender-name";
+    name.textContent = isUser ? myName : "PyBot";
+
+    const bubble = document.createElement("div");
+    bubble.className = "bubble " + (isUser ? "user" : "bot");
+    bubble.innerHTML = renderMarkdown(text);
+
+    const time = document.createElement("div");
+    time.className = "msg-time";
+    time.textContent = now();
+
+    wrap.appendChild(name);
+    wrap.appendChild(bubble);
+    wrap.appendChild(time);
+    row.appendChild(av);
+    row.appendChild(wrap);
+
+    // Insert before typing row
+    messagesEl.appendChild(row);
+    scrollBottom();
+  }
+
+  function scrollBottom() {
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function setTyping(on) {
+    botTyping = on;
+    typingRow.style.display = on ? "flex" : "none";
+    botAvatar.classList.toggle("thinking", on);
+    statusText.textContent = on ? "Typing..." : "Online";
+    if (on) scrollBottom();
+  }
+
+  // ── Send ──────────────────────────────────────────────
+
+  function sendMessage() {
+    const msg = inputEl.value.trim();
+    if (!msg || botTyping) return;
+
+    appendMessage(msg, "user");
+
+    // Try to capture user name for avatar
+    const nm = msg.match(/(?:i(?:'m| am)|my name is|call me) (\w+)/i);
+    if (nm) myName = nm[1].charAt(0).toUpperCase() + nm[1].slice(1);
+
+    socket.emit("user_message", { msg });
+    inputEl.value = "";
+    inputEl.style.height = "auto";
+    sendBtn.disabled = true;
+    document.getElementById("char-hint").textContent = "";
+  }
+
+  function suggest(text) {
+    inputEl.value = text;
+    inputEl.style.height = "auto";
+    inputEl.style.height = inputEl.scrollHeight + "px";
+    sendBtn.disabled = false;
+    inputEl.focus();
+    sendMessage();
+  }
+
+  function onInput() {
+    inputEl.style.height = "auto";
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + "px";
+    sendBtn.disabled = inputEl.value.trim().length === 0;
+    const len = inputEl.value.length;
+    document.getElementById("char-hint").textContent = len > 0 ? `${len} chars` : "";
+  }
+
+  function handleKey(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (!sendBtn.disabled) sendMessage();
+    }
+  }
+
+  // ── Socket Events ─────────────────────────────────────
+
+  socket.on("bot_message", ({ msg, time }) => {
+    setTyping(false);
+    appendMessage(msg, "bot");
+  });
+
+  socket.on("bot_typing", ({ typing }) => {
+    setTyping(typing);
+  });
+
+  socket.on("connect", () => {
+    statusText.textContent = "Online";
+  });
+
+  socket.on("disconnect", () => {
+    statusText.textContent = "Disconnected";
+  });
+
+  inputEl.focus();
+</script>
+</body>
+</html>
